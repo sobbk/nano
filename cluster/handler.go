@@ -428,8 +428,8 @@ func (h *LocalHandler) processMessage(agent *agent, msg *message.Message) {
 	}
 }
 
-func (h *LocalHandler) handleWS(conn *websocket.Conn) {
-	c, err := newWSConn(conn)
+func (h *LocalHandler) handleWS(conn *websocket.Conn, realIP net.Addr) {
+	c, err := newWSConn(conn, realIP)
 	if err != nil {
 		log.Println(err)
 		return

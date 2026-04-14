@@ -264,7 +264,7 @@ func (n *Node) listenAndServeWS() {
 			return
 		}
 
-		n.handler.handleWS(conn)
+		n.handler.handleWS(conn, realIPFromRequest(r, conn.RemoteAddr()))
 	})
 
 	if err := http.ListenAndServe(n.ClientAddr, nil); err != nil {
@@ -286,12 +286,37 @@ func (n *Node) listenAndServeWSTLS() {
 			return
 		}
 
-		n.handler.handleWS(conn)
+		n.handler.handleWS(conn, realIPFromRequest(r, conn.RemoteAddr()))
 	})
 
 	if err := http.ListenAndServeTLS(n.ClientAddr, n.TSLCertificate, n.TSLKey, nil); err != nil {
 		log.Fatal(err.Error())
 	}
+}
+
+// realIPFromRequest extracts the real client IP from reverse proxy headers,
+// combining it with the port from fallback (the actual proxy TCP connection).
+// Priority: X-Real-IP > first IP in X-Forwarded-For.
+// Returns fallback unchanged when no proxy headers are present.
+func realIPFromRequest(r *http.Request, fallback net.Addr) net.Addr {
+	var realIP string
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		realIP = strings.TrimSpace(ip)
+	} else if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.Index(xff, ","); idx > 0 {
+			realIP = strings.TrimSpace(xff[:idx])
+		} else {
+			realIP = strings.TrimSpace(xff)
+		}
+	}
+	if realIP == "" {
+		return fallback
+	}
+	_, port, err := net.SplitHostPort(fallback.String())
+	if err != nil {
+		port = "0"
+	}
+	return stringAddr{addr: net.JoinHostPort(realIP, port)}
 }
 
 func (n *Node) storeSession(s *session.Session) {

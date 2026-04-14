@@ -28,17 +28,27 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// stringAddr wraps an IP string as net.Addr, used to carry real client IP
+// extracted from reverse proxy headers (X-Real-IP / X-Forwarded-For).
+type stringAddr struct {
+	addr string
+}
+
+func (a stringAddr) Network() string { return "tcp" }
+func (a stringAddr) String() string  { return a.addr }
+
 // wsConn is an adapter to t.Conn, which implements all t.Conn
 // interface base on *websocket.Conn
 type wsConn struct {
 	conn   *websocket.Conn
 	typ    int // message type
 	reader io.Reader
+	realIP net.Addr // real client IP from reverse proxy headers, nil if direct connection
 }
 
 // newWSConn return an initialized *wsConn
-func newWSConn(conn *websocket.Conn) (*wsConn, error) {
-	c := &wsConn{conn: conn}
+func newWSConn(conn *websocket.Conn, realIP net.Addr) (*wsConn, error) {
+	c := &wsConn{conn: conn, realIP: realIP}
 
 	t, r, err := conn.NextReader()
 	if err != nil {
@@ -93,7 +103,12 @@ func (c *wsConn) LocalAddr() net.Addr {
 }
 
 // RemoteAddr returns the remote network address.
+// Returns the real client IP from proxy headers when available,
+// otherwise falls back to the underlying websocket connection address.
 func (c *wsConn) RemoteAddr() net.Addr {
+	if c.realIP != nil {
+		return c.realIP
+	}
 	return c.conn.RemoteAddr()
 }
 
