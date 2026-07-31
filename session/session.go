@@ -58,6 +58,7 @@ type Session struct {
 	entity       NetworkEntity          // low-level network entity
 	data         map[string]interface{} // session data store
 	router       *Router
+	closeReason  string // 本次关闭原因，仅供 nano 内部在关闭触发点设置
 }
 
 // New returns a new session instance
@@ -132,6 +133,25 @@ func (s *Session) Bind(uid int64) error {
 // all related data should be Clear explicitly in Session closed callback
 func (s *Session) Close() {
 	s.entity.Close()
+}
+
+// SetCloseReason 记录本次连接关闭的原因（read_error/heartbeat_timeout/kicked 等）。
+// 先到先得：Close() 会级联触发另一侧读/写报错并再次调用本方法，若允许覆盖会导致
+// read_error/write_error 冲掉真实根因。
+func (s *Session) SetCloseReason(reason string) {
+	s.Lock()
+	defer s.Unlock()
+	if s.closeReason == "" {
+		s.closeReason = reason
+	}
+}
+
+// CloseReason 返回本次连接关闭的原因，未设置时返回空字符串。
+// 用于 OnClosed 回调中区分断线来源。
+func (s *Session) CloseReason() string {
+	s.RLock()
+	defer s.RUnlock()
+	return s.closeReason
 }
 
 // RemoteAddr returns the remote network address.

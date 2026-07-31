@@ -256,6 +256,7 @@ func (a *agent) write() {
 			deadline := time.Now().Add(-2 * env.Heartbeat).Unix()
 			if atomic.LoadInt64(&a.lastAt) < deadline {
 				log.Println(fmt.Sprintf("Session heartbeat timeout, LastTime=%d, Deadline=%d", atomic.LoadInt64(&a.lastAt), deadline))
+				a.session.SetCloseReason("heartbeat_timeout")
 				return
 			}
 			chWrite <- hbd
@@ -264,6 +265,7 @@ func (a *agent) write() {
 			// close agent while low-level conn broken
 			if _, err := a.conn.Write(data); err != nil {
 				log.Println(err.Error())
+				a.session.SetCloseReason("write_error")
 				return
 			}
 

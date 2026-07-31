@@ -248,6 +248,11 @@ func (h *LocalHandler) handle(conn net.Conn) {
 		n, err := conn.Read(buf)
 		if err != nil {
 			log.Println(fmt.Sprintf("Read message error: %s, session will be closed immediately", err.Error()))
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				agent.session.SetCloseReason("client_closed")
+			} else {
+				agent.session.SetCloseReason("read_error")
+			}
 			return
 		}
 
@@ -255,11 +260,13 @@ func (h *LocalHandler) handle(conn net.Conn) {
 		packets, err := agent.decoder.Decode(buf[:n])
 		if err != nil {
 			log.Println(err.Error())
+			agent.session.SetCloseReason("decode_error")
 
 			// process packets decoded
 			for _, p := range packets {
 				if err := h.processPacket(agent, p); err != nil {
 					log.Println(err.Error())
+					agent.session.SetCloseReason("process_packet_error")
 					return
 				}
 			}
@@ -270,6 +277,7 @@ func (h *LocalHandler) handle(conn net.Conn) {
 		for _, p := range packets {
 			if err := h.processPacket(agent, p); err != nil {
 				log.Println(err.Error())
+				agent.session.SetCloseReason("process_packet_error")
 				return
 			}
 		}
