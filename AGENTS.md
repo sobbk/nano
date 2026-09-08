@@ -79,6 +79,7 @@ Backend 节点收到本地无法处理的消息时，通过 gRPC 转发到对应
 - `nano.Listen` 的 `WithComponents` 选项接受 `*component.Components`，通过 `hub.go` 统一管理生命周期
 - 序列化器默认为 JSON，生产环境可通过 `WithSerializer(protobuf.NewSerializer())` 切换
 - Session 的 `Bind(uid)` 绑定用户 ID 后，Group 的 `Members()` 返回的是 UID 列表而非 Session ID
+- 客户端 Session 心跳超时时长可通过 `WithHeartbeatTimeout` 独立配置，不设置（零值）时回退为 4 倍心跳间隔（`WithHeartbeatInterval`），两者不再强制耦合
 
 ## 示例代码
 

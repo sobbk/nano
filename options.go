@@ -79,6 +79,15 @@ func WithHeartbeatInterval(d time.Duration) Option {
 	}
 }
 
+// WithHeartbeatTimeout sets Heartbeat timeout duration independently from the
+// heartbeat interval. If not set (zero value), it falls back to 4x the
+// heartbeat interval at the time the timeout is evaluated.
+func WithHeartbeatTimeout(d time.Duration) Option {
+	return func(_ *cluster.Options) {
+		env.HeartbeatTimeout = d
+	}
+}
+
 // WithCheckOriginFunc sets the function that check `Origin` in http headers
 func WithCheckOriginFunc(fn func(*http.Request) bool) Option {
 	return func(opt *cluster.Options) {
