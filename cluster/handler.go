@@ -64,13 +64,14 @@ func cache() {
 			"servertime": time.Now().UTC().Unix(),
 		},
 	}
-	if dict, ok := message.GetDictionary(); ok {
+	if _, ok := message.GetDictionary(); ok {
 		hrdata = map[string]interface{}{
 			"code": 200,
 			"sys": map[string]interface{}{
 				"heartbeat":  env.Heartbeat.Seconds(),
 				"servertime": time.Now().UTC().Unix(),
-				"dict":       dict,
+				// 客户端不读 dict，不再下发
+				// "dict": dict,
 			},
 		}
 	}
