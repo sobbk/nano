@@ -196,24 +196,18 @@ func (a *agent) ResponseMid(mid uint64, v interface{}) error {
 // Close closes the agent, clean inner state and close low-level connection.
 // Any blocked Read or Write operations will be unblocked and return errors.
 func (a *agent) Close() error {
-	if a.status() == statusClosed {
+	// swap is atomic, so only the first of concurrent callers gets past this point
+	if atomic.SwapInt32(&a.state, statusClosed) == statusClosed {
 		return ErrCloseClosedSession
 	}
-	a.setStatus(statusClosed)
 
 	if env.Debug {
 		log.Println(fmt.Sprintf("Session closed, ID=%d, UID=%d, IP=%s",
 			a.session.ID(), a.session.UID(), a.conn.RemoteAddr()))
 	}
 
-	// prevent closing closed channel
-	select {
-	case <-a.chDie:
-		// expect
-	default:
-		close(a.chDie)
-		scheduler.PushTask(func() { session.Lifetime.Close(a.session) })
-	}
+	close(a.chDie)
+	scheduler.PushTask(func() { session.Lifetime.Close(a.session) })
 
 	return a.conn.Close()
 }

@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/lonng/nano/internal/message"
 	"github.com/lonng/nano/internal/packet"
 	"github.com/lonng/nano/pipeline"
+	"github.com/lonng/nano/scheduler"
 	"github.com/lonng/nano/session"
 )
 
@@ -294,5 +296,60 @@ func TestWriteRecoversOutboundPanic(t *testing.T) {
 	}
 	if got := sessionCount(n); got != 0 {
 		t.Fatalf("session leaked after panic, count=%d", got)
+	}
+}
+
+// schedulerAlive reports whether the global scheduler is consuming tasks.
+func schedulerAlive() bool {
+	ran := make(chan struct{})
+	go scheduler.PushTask(func() { close(ran) })
+	select {
+	case <-ran:
+		return true
+	case <-time.After(time.Second):
+		return false
+	}
+}
+
+func TestAgentConcurrentClose(t *testing.T) {
+	// Close pushes a task; without a running scheduler the queue blocks after 256 closes
+	go scheduler.Sched()
+	if !schedulerAlive() {
+		t.Skip("global scheduler was already stopped by an earlier test (this package is not re-runnable with -count>1)")
+	}
+
+	const rounds = 5000
+	for _, workers := range []int{2, 8} {
+		for r := 0; r < rounds; r++ {
+			a := newAgent(fakeConn{}, nil, nil)
+			start := make(chan struct{})
+			errs := make(chan error, workers)
+			for i := 0; i < workers; i++ {
+				go func() {
+					defer func() {
+						if p := recover(); p != nil {
+							errs <- fmt.Errorf("panic: %v", p)
+						}
+					}()
+					<-start
+					errs <- a.Close()
+				}()
+			}
+			close(start)
+
+			succeeded := 0
+			for i := 0; i < workers; i++ {
+				switch err := <-errs; err {
+				case nil:
+					succeeded++
+				case ErrCloseClosedSession:
+				default:
+					t.Fatalf("workers=%d round=%d: unexpected result: %v", workers, r, err)
+				}
+			}
+			if succeeded != 1 {
+				t.Fatalf("workers=%d round=%d: %d callers closed the agent, want exactly 1", workers, r, succeeded)
+			}
+		}
 	}
 }
