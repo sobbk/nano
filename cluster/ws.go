@@ -28,6 +28,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// firstFrameTimeout bounds how long an upgraded connection may stay silent before its first frame.
+var firstFrameTimeout = 20 * time.Second
+
 // stringAddr wraps an IP string as net.Addr, used to carry real client IP
 // extracted from reverse proxy headers (X-Real-IP / X-Forwarded-For).
 type stringAddr struct {
@@ -50,8 +53,16 @@ type wsConn struct {
 func newWSConn(conn *websocket.Conn, realIP net.Addr) (*wsConn, error) {
 	c := &wsConn{conn: conn, realIP: realIP}
 
+	// no agent (and therefore no heartbeat timeout) exists yet, so bound the wait for the first frame
+	if err := conn.SetReadDeadline(time.Now().Add(firstFrameTimeout)); err != nil {
+		return nil, err
+	}
 	t, r, err := conn.NextReader()
 	if err != nil {
+		return nil, err
+	}
+	// once the agent starts, the heartbeat timeout takes over
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		return nil, err
 	}
 

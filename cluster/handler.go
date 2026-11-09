@@ -27,9 +27,11 @@ import (
 	"math/rand"
 	"net"
 	"reflect"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -214,6 +216,14 @@ func (h *LocalHandler) handle(conn net.Conn) {
 
 	// guarantee agent related resource be destroyed
 	defer func() {
+		// the inbound pipeline and deserialization run in the read goroutine; recover so a panic only drops this connection instead of crashing the process
+		if r := recover(); r != nil {
+			log.Println(fmt.Sprintf("Session read goroutine panic: %+v\n%s", r, debug.Stack()))
+			agent.session.SetCloseReason("panic")
+		}
+
+		h.currentNode.removeSession(agent.session.ID())
+
 		request := &clusterpb.SessionClosedRequest{
 			SessionId: agent.session.ID(),
 		}
@@ -288,6 +298,11 @@ func (h *LocalHandler) handle(conn net.Conn) {
 func (h *LocalHandler) processPacket(agent *agent, p *packet.Packet) error {
 	switch p.Type {
 	case packet.Handshake:
+		if agent.status() != statusStart {
+			return fmt.Errorf("receive handshake on socket which already handshaked, session will be closed immediately, remote=%s",
+				agent.conn.RemoteAddr().String())
+		}
+
 		if err := env.HandshakeValidator(agent.session, p.Data); err != nil {
 			return err
 		}
@@ -302,6 +317,11 @@ func (h *LocalHandler) processPacket(agent *agent, p *packet.Packet) error {
 		}
 
 	case packet.HandshakeAck:
+		if agent.status() != statusHandshake {
+			return fmt.Errorf("receive handshake ack on socket which not in handshake state, session will be closed immediately, remote=%s",
+				agent.conn.RemoteAddr().String())
+		}
+
 		agent.setStatus(statusWorking)
 		if env.Debug {
 			log.Println(fmt.Sprintf("Receive handshake ACK Id=%d, Remote=%s", agent.session.ID(), agent.conn.RemoteAddr()))
@@ -323,7 +343,11 @@ func (h *LocalHandler) processPacket(agent *agent, p *packet.Packet) error {
 		// expected
 	}
 
-	agent.lastAt = time.Now().Unix()
+	// only a successful handshake may refresh lastAt while still in the start state, otherwise
+	// an unhandshaked connection could stay alive on heartbeat or kick packets alone
+	if agent.status() != statusStart {
+		atomic.StoreInt64(&agent.lastAt, time.Now().Unix())
+	}
 	return nil
 }
 
@@ -441,6 +465,8 @@ func (h *LocalHandler) handleWS(conn *websocket.Conn, realIP net.Addr) {
 	c, err := newWSConn(conn, realIP)
 	if err != nil {
 		log.Println(err)
+		// handle() never starts, so nothing else will close the socket
+		conn.Close()
 		return
 	}
 	go h.handle(c)

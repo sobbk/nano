@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 
@@ -241,6 +242,12 @@ func (a *agent) write() {
 	chWrite := make(chan []byte, agentWriteBacklog)
 	// clean func
 	defer func() {
+		// the outbound pipeline runs in this goroutine; recover so a panic only drops this connection instead of crashing the process
+		if r := recover(); r != nil {
+			log.Println(fmt.Sprintf("Session write goroutine panic: %+v\n%s", r, debug.Stack()))
+			a.session.SetCloseReason("panic")
+		}
+
 		ticker.Stop()
 		close(a.chSend)
 		close(chWrite)

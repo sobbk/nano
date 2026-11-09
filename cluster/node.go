@@ -325,6 +325,15 @@ func (n *Node) storeSession(s *session.Session) {
 	n.mu.Unlock()
 }
 
+// removeSession removes the session from sessions and returns it, safe to call repeatedly
+func (n *Node) removeSession(sid int64) (*session.Session, bool) {
+	n.mu.Lock()
+	s, found := n.sessions[sid]
+	delete(n.sessions, sid)
+	n.mu.Unlock()
+	return s, found
+}
+
 func (n *Node) findSession(sid int64) *session.Session {
 	n.mu.RLock()
 	s := n.sessions[sid]
@@ -424,10 +433,7 @@ func (n *Node) DelMember(_ context.Context, req *clusterpb.DelMemberRequest) (*c
 
 // SessionClosed implements the MemberServer interface
 func (n *Node) SessionClosed(_ context.Context, req *clusterpb.SessionClosedRequest) (*clusterpb.SessionClosedResponse, error) {
-	n.mu.Lock()
-	s, found := n.sessions[req.SessionId]
-	delete(n.sessions, req.SessionId)
-	n.mu.Unlock()
+	s, found := n.removeSession(req.SessionId)
 	if found {
 		scheduler.PushTask(func() { session.Lifetime.Close(s) })
 	}
@@ -436,10 +442,7 @@ func (n *Node) SessionClosed(_ context.Context, req *clusterpb.SessionClosedRequ
 
 // CloseSession implements the MemberServer interface
 func (n *Node) CloseSession(_ context.Context, req *clusterpb.CloseSessionRequest) (*clusterpb.CloseSessionResponse, error) {
-	n.mu.Lock()
-	s, found := n.sessions[req.SessionId]
-	delete(n.sessions, req.SessionId)
-	n.mu.Unlock()
+	s, found := n.removeSession(req.SessionId)
 	if found {
 		s.Close()
 	}

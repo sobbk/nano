@@ -162,3 +162,61 @@ func TestEncode(t *testing.T) {
 		t.Error("not equal")
 	}
 }
+
+func TestDecodeMalformed(t *testing.T) {
+	SetDictionary(map[string]uint16{"test.test.test": 100})
+
+	// 11 continuation bytes followed by a terminating byte
+	longVarint := []byte{byte(Request) << 1}
+	for i := 0; i < 11; i++ {
+		longVarint = append(longVarint, 0x80)
+	}
+	longVarint = append(longVarint, 0x01)
+
+	cases := []struct {
+		name string
+		data []byte
+	}{
+		{"compressed route with one byte", []byte{byte(Notify)<<1 | msgRouteCompressMask, 0x00}},
+		{"compressed request route truncated", []byte{byte(Request)<<1 | msgRouteCompressMask, 0x01, 0x00}},
+		{"compressed route code not found", []byte{byte(Notify)<<1 | msgRouteCompressMask, 0xFF, 0xFF}},
+		{"varint never terminated", []byte{byte(Request) << 1, 0x80, 0x80, 0x80}},
+		{"varint longer than 10 bytes", longVarint},
+		{"route length exceeds data", []byte{byte(Notify) << 1, 0x10, 'a'}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := Decode(c.data); err == nil {
+				t.Fatalf("expect error, got nil")
+			}
+		})
+	}
+}
+
+func TestDecodeTruncatedNoPanic(t *testing.T) {
+	SetDictionary(map[string]uint16{"test.test.test": 100})
+
+	msgs := []*Message{
+		{Type: Request, ID: 1 << 40, Route: "test.test.test", Data: []byte("hello")},
+		{Type: Request, ID: 100, Route: "test.test.other", Data: []byte("hello")},
+		{Type: Notify, Route: "test.test.test", Data: []byte("hello")},
+		{Type: Response, ID: 300, Data: []byte("hello")},
+		{Type: Push, Route: "test.test.test", Data: []byte("hello")},
+	}
+	for _, m := range msgs {
+		em, err := m.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i <= len(em); i++ {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("decode panic: type=%v prefix=%d: %v", m.Type, i, r)
+					}
+				}()
+				_, _ = Decode(em[:i])
+			}()
+		}
+	}
+}

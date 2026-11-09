@@ -45,6 +45,7 @@ const (
 	msgTypeMask          = 0x07
 	msgRouteLengthMask   = 0xFF
 	msgHeadLength        = 0x02
+	maxVarintLength      = 10 // a uint64 varint takes at most 10 bytes
 )
 
 var types = map[Type]string{
@@ -180,13 +181,18 @@ func Decode(data []byte) (*Message, error) {
 		// little end byte order
 		// WARNING: must can be stored in 64 bits integer
 		// variant length encode
-		for i := offset; i < len(data); i++ {
+		terminated := false
+		for i := offset; i < len(data) && i-offset < maxVarintLength; i++ {
 			b := data[i]
 			id += uint64(b&0x7F) << uint64(7*(i-offset))
 			if b < 128 {
 				offset = i + 1
+				terminated = true
 				break
 			}
+		}
+		if !terminated {
+			return nil, ErrWrongMessage
 		}
 		m.ID = id
 	}
@@ -198,6 +204,9 @@ func Decode(data []byte) (*Message, error) {
 	if routable(m.Type) {
 		if flag&msgRouteCompressMask == 1 {
 			m.compressed = true
+			if offset+2 > len(data) {
+				return nil, ErrWrongMessage
+			}
 			code := binary.BigEndian.Uint16(data[offset:(offset + 2)])
 			route, ok := codes[code]
 			if !ok {
